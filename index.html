@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Juego Espacial Infinito</title>
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <h1>🚀 Juego Espacial Infinito</h1>
+  <canvas id="game" width="500" height="800"></canvas>
+  <button id="pauseButton" onclick="togglePause()">⏸ Pausa</button>
+
+  <div id="menu">
+    <h2>¡Bienvenido, piloto!</h2>
+    <label>Nombre del jugador:</label><br>
+    <input id="playerNameInput" type="text" placeholder="Tu nombre" /><br>
+    <p>🧠 Mejor puntuación: <span id="highScore">0</span></p>
+    <p>📈 Nivel máximo: <span id="maxLevel">0</span></p>
+    <button onclick="startGame()">Iniciar juego</button>
+    <button onclick="showRanking()">Ver Ranking</button>
+    <button onclick="resetRanking()">🧹 Resetear Ranking</button>
+  </div>
+
+  <div id="rankingPanel">
+    <h2>🏆 Top 5 Jugadores</h2>
+    <div id="rankingList"></div>
+    <button onclick="hideRanking()">Volver</button>
+  </div>
+
+  <div id="gameover">
+    <h2>💀 Fin del juego</h2>
+    <p id="finalScore"></p>
+    <button onclick="restartGame()">Reiniciar</button>
+    <button onclick="returnToMenu()">Volver al menú</button>
+  </div>
+  <div id="pauseMenu" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%);
+ background:rgba(0,0,0,0.8); color:white; padding:20px; border-radius:10px; text-align:center;">
+  <h2>⏸ Juego en pausa</h2>
+  <button onclick="resumeGame()">▶ Continuar</button>
+  <button onclick="returnToMenu()">Volver al menú</button>
+</div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const menu = document.getElementById("menu");
+    const gameover = document.getElementById("gameover");
+    const finalScoreText = document.getElementById("finalScore");
+    const highScoreEl = document.getElementById("highScore");
+    const maxLevelEl = document.getElementById("maxLevel");
+    const playerNameInput = document.getElementById("playerNameInput");
+    const rankingPanel = document.getElementById("rankingPanel");
+    const rankingList = document.getElementById("rankingList");
+
+    const images = {};
+    const sources = {
+      ship: 'assets/ship.png',
+      asteroid: 'assets/asteroid.png',
+      planet: 'assets/planet.png',
+      alien: 'assets/alien.png',
+      missile: 'assets/missile.png',
+      heart: 'assets/heart.png',
+      playermissile: 'assets/player-missile.png'
+    };
+
+    let player, obstacles, enemyMissiles, homingMissiles, score, level, spawnRate, obstacleSpeed, keys, spawnTimer, lives, isImmune, isPaused = false;
+    let gameLoopInterval, immunityTimer = 0;
+    let highScore = 0;
+    let maxLevel = 0;
+    let playerName = "Jugador";
+    let elapsedTime = 0;
+    let nextLifeScore = 500;
+    let timerInterval;
+    let leaderboard = JSON.parse(localStorage.getItem("leaderboard")) || {};
+let leaderboardTimes = JSON.parse(localStorage.getItem("leaderboardTimes")) || {};
+    function saveLeaderboard() {
+  leaderboard[playerName] = Math.max(score, leaderboard[playerName] || 0);
+  const currentBest = leaderboardTimes[playerName];
+  const currentSec = currentBest ? Number(currentBest.split(':')[0])*60 + Number(currentBest.split(':')[1]) : 0;
+  const newSec = elapsedTime;
+  if (!currentBest || newSec > currentSec) leaderboardTimes[playerName] = formatTime(elapsedTime);
+  localStorage.setItem("leaderboard", JSON.stringify(leaderboard));
+  localStorage.setItem("leaderboardTimes", JSON.stringify(leaderboardTimes));
+}
+  
+keys = {};
+document.addEventListener("keydown", (e) => {
+  keys[e.key] = true;
+});
+
+document.addEventListener("keyup", (e) => {
+  keys[e.key] = false;
+});
+function setupMobileControls() {
+  const btns = {
+    "btn-left": "ArrowLeft",
+    "btn-right": "ArrowRight",
+    "btn-up": "ArrowUp",
+    "btn-down": "ArrowDown"
+  };
+  for (let id in btns) {
+    const key = btns[id];
+    const el = document.getElementById(id);
+    el.addEventListener("touchstart", () => keys[key] = true);
+    el.addEventListener("touchend", () => keys[key] = false);
+  }
+}
+    function loadImages(sources, callback) {
+      let loadedImages = 0;
+      let numImages = Object.keys(sources).length;
+      for (let src in sources) {
+        images[src] = new Image();
+        images[src].onload = () => {
+          if (++loadedImages >= numImages) callback();
+        };
+        images[src].src = sources[src];
+      }
+    }
+    function formatTime(seconds) {
+  const min = String(Math.floor(seconds / 60)).padStart(2, '0');
+  const sec = String(seconds % 60).padStart(2, '0');
+  return `${min}:${sec}`;
+}
+    function resetGame(fullReset = true) {
+      player = { x: 215, y: 700, width: 50, height: 45, speed: 5 };
+      obstacles = [];
+      enemyMissiles = [];
+      homingMissiles = [];
+      if (fullReset) {
+        score = 0;
+        level = 1;
+        lives = 3;
+        spawnRate = 1500;
+        obstacleSpeed = 2;
+      }
+      keys = {};
+      isImmune = false;
+      isPaused = false;
+    }
+
+    function togglePause() {
+  isPaused = !isPaused;
+  const pauseButton = document.getElementById("pauseButton");
+  const pauseMenu = document.getElementById("pauseMenu");
+
+  if (isPaused) {
+    pauseButton.textContent = "▶ Reanudar";
+    pauseMenu.style.display = "block";
+  } else {
+    pauseButton.textContent = "⏸ Pausa";
+    pauseMenu.style.display = "none";
+  }
+}
+
+function resumeGame() {
+  isPaused = false;
+  document.getElementById("pauseButton").textContent = "⏸ Pausa";
+  document.getElementById("pauseMenu").style.display = "none";
+}
+
+    function showRanking() {
+      rankingPanel.style.display = "block";
+      menu.style.display = "none";
+      updateRankingPanel();
+    }
+
+    function hideRanking() {
+      rankingPanel.style.display = "none";
+      menu.style.display = "block";
+    }
+
+    function updateRankingPanel() {
+      function saveLeaderboard() {
+  leaderboard[playerName] = Math.max(score, leaderboard[playerName] || 0);
+  const currentBest = leaderboardTimes[playerName];
+  const currentSec = currentBest ? Number(currentBest.split(':')[0])*60 + Number(currentBest.split(':')[1]) : 0;
+  const newSec = elapsedTime;
+  if (!currentBest || newSec > currentSec) leaderboardTimes[playerName] = formatTime(elapsedTime);
+  localStorage.setItem("leaderboard", JSON.stringify(leaderboard));
+  localStorage.setItem("leaderboardTimes", JSON.stringify(leaderboardTimes));
+}
+      const sorted = Object.entries(leaderboard).sort((a, b) => b[1] - a[1]).slice(0, 5);
+rankingList.innerHTML = '<ol>' + sorted.map(([name, score]) => {
+  const time = leaderboardTimes?.[name] || '00:00';
+  return `<li>${name}: ${score} pts – ${time}</li>`;
+}).join('') + '</ol>';
+    }
+
+    let nextEnemyId = 0;
+
+function spawnObstacle() {
+  const isBossLevel = level % 3 === 0;
+  const isBoss = isBossLevel && Math.random() < 0.5;
+
+  const enemyTypes = ['asteroid', 'planet', 'alien'];
+  const type = isBoss ? 'alien' : enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
+  const width = isBoss ? 80 : 40;
+  const height = isBoss ? 60 : (type === 'alien' ? 35 : 50);
+  const x = Math.random() * (canvas.width - width);
+
+  obstacles.push({
+    id: nextEnemyId++, // 👈 ID único para cada enemigo
+    x,
+    y: -height,
+    width,
+    height,
+    type,
+    shootCooldown: 0,
+    isBoss,
+    homingCount: 0
+  });
+}
+
+    function shootMissile(enemy) {
+      const maxMissiles = level >= 15 ? 3 : level >= 10 ? 2 : 1;
+      if (enemy.isBoss && enemy.homingCount < maxMissiles) {
+        homingMissiles.push({ x: enemy.x + enemy.width / 2, y: enemy.y + enemy.height, width: 12, height: 20, age: 0 });
+        enemy.homingCount++;
+      } else if (!enemy.isBoss) {
+        enemyMissiles.push({ x: enemy.x + 15, y: enemy.y + 35, width: 10, height: 20 });
+      }
+    }
+
+    function update() {
+      if (isPaused) return;
+      updateMissiles();
+      updateEnemiesZigZag();
+
+      if (keys['ArrowLeft']) player.x -= player.speed;
+      if (keys['ArrowRight']) player.x += player.speed;
+      if (keys['ArrowUp']) player.y -= player.speed;
+      if (keys['ArrowDown']) player.y += player.speed;
+
+      player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
+      player.y = Math.max(0, Math.min(canvas.height - player.height, player.y));
+
+      if (immunityTimer > 0) {
+        immunityTimer--;
+        if (immunityTimer === 0) isImmune = false;
+      }
+
+      obstacles.forEach((o) => {
+        o.y += obstacleSpeed;
+        if (o.type === 'alien' && o.shootCooldown <= 0) {
+          shootMissile(o);
+          o.shootCooldown = 120 - level * 5;
+        }
+        o.shootCooldown--;
+      });
+      playerMissiles.forEach((m, mi) => {
+  obstacles.forEach((o, oi) => {
+    if (
+      m.x < o.x + o.width &&
+      m.x + m.width > o.x &&
+      m.y < o.y + o.height &&
+      m.y + m.height > o.y
+    ) {
+      playerMissiles.splice(mi, 1);
+      if (updateEnemyHealth(o)) {
+      obstacles.splice(oi, 1);
+      if (o.isBoss) {
+        score += 50;
+      } else if (o.type === 'alien') {
+        score += 10;
+      } else {
+        score += 5;
+      }
+      }
+    }
+  });
+});
+      obstacles = obstacles.filter(o => o.y < canvas.height);
+
+      enemyMissiles.forEach(m => m.y += (obstacleSpeed + 2));
+      enemyMissiles = enemyMissiles.filter(m => m.y < canvas.height);
+
+      homingMissiles.forEach(m => {
+        m.age++;
+        if (m.age > 240) m.remove = true;
+        let dx = player.x + player.width / 2 - m.x;
+        let dy = player.y + player.height / 2 - m.y;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0) {
+          dx /= dist;
+          dy /= dist;
+          m.x += dx * 2;
+          m.y += dy * 2;
+        }
+      });
+      homingMissiles = homingMissiles.filter(m => !m.remove);
+
+      if (!isImmune) {
+        [...obstacles, ...enemyMissiles, ...homingMissiles].forEach(obj => {
+          if (
+            player.x < obj.x + obj.width &&
+            player.x + player.width > obj.x &&
+            player.y < obj.y + obj.height &&
+            player.y + player.height > obj.y
+          ) loseLife();
+        });
+      }
+
+      
+      if (score >= level * 150) {
+        level++;
+        obstacleSpeed += 0.5;
+        if (spawnRate > 400) spawnRate -= 100;
+        clearInterval(spawnTimer);
+        spawnTimer = setInterval(spawnObstacle, spawnRate);
+      }
+      if (score >= nextLifeScore) {
+      lives++;
+      nextLifeScore += 500;
+}
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (isImmune && Math.floor(immunityTimer / 10) % 2 === 0) ctx.globalAlpha = 0.3;
+      ctx.drawImage(images.ship, player.x, player.y, player.width, player.height);
+      ctx.globalAlpha = 1.0;
+
+      obstacles.forEach(o => ctx.drawImage(images[o.type], o.x, o.y, o.width, o.height));
+      enemyMissiles.forEach(m => ctx.drawImage(images.missile, m.x, m.y, m.width, m.height));
+      homingMissiles.forEach(m => ctx.drawImage(images.missile, m.x, m.y, m.width, m.height));
+
+      ctx.fillStyle = "#0ff";
+      ctx.font = "18px monospace";
+      ctx.fillText(`Nivel: ${level}  Puntos: ${score}  Vidas: ${lives}`, 10, 20);
+      drawMissiles();
+      drawHearts();
+    }
+
+    function loseLife() {
+      lives--;
+      isImmune = true;
+      immunityTimer = 150;
+
+      if (lives === 0) {
+  clearInterval(gameLoopInterval);
+  clearInterval(spawnTimer);
+  clearInterval(timerInterval);
+  gameLoopInterval = null;
+  spawnTimer = null;
+
+  finalScoreText.textContent = `${playerName} - Puntuación: ${score} | Nivel: ${level}`;
+  finalScoreText.textContent += ` | Tiempo: ${formatTime(elapsedTime)}`;
+  leaderboard[playerName] = Math.max(score, leaderboard[playerName] || 0);
+  saveLeaderboard();
+  updateRankingPanel();
+  highScore = Math.max(highScore, score);
+  maxLevel = Math.max(maxLevel, level);
+  highScoreEl.textContent = highScore;
+  maxLevelEl.textContent = maxLevel;
+
+  gameover.style.display = "block";
+}
+    }
+      isImmune = true;
+      immunityTimer = 150;
+      if (lives < 0) {
+        clearInterval(gameLoopInterval);
+        clearInterval(spawnTimer);
+        finalScoreText.textContent = `${playerName} - Puntuación: ${score} | Nivel: ${level}`;
+        leaderboard[playerName] = Math.max(score, leaderboard[playerName] || 0);
+        saveLeaderboard(); // ← Guarda en localStorage
+        updateRankingPanel();
+        highScore = Math.max(highScore, score);
+        maxLevel = Math.max(maxLevel, level);
+        highScoreEl.textContent = highScore;
+        maxLevelEl.textContent = maxLevel;
+        gameover.style.display = "block";
+      }
+
+    function startGame() {
+      clearInterval(gameLoopInterval);
+      clearInterval(spawnTimer);
+      gameLoopInterval = null;
+      spawnTimer = null;
+
+      playerName = playerNameInput.value || "Jugador";
+      resetGame(true);
+      menu.style.display = "none";
+      gameover.style.display = "none";
+      gameLoopInterval = setInterval(() => {
+  try {
+    update();
+    draw();
+  } catch (err) {
+    console.error("Error en loop del juego:", err);
+    clearInterval(gameLoopInterval);
+  }
+}, 30);
+      spawnTimer = setInterval(spawnObstacle, spawnRate);
+      elapsedTime = 0;
+      timerInterval = setInterval(() => {
+        elapsedTime++;
+}, 1000);
+    }
+
+    function restartGame() {
+      clearInterval(gameLoopInterval);
+      clearInterval(spawnTimer);
+      gameLoopInterval = null;
+      spawnTimer = null;
+
+      resetGame(true);
+      gameover.style.display = "none";
+      startGame();
+    }
+
+    function returnToMenu() {
+  clearInterval(gameLoopInterval);
+  clearInterval(spawnTimer);
+  gameLoopInterval = null;
+  spawnTimer = null;
+  isPaused = false;
+  keys = {};
+  menu.style.display = "block";
+  gameover.style.display = "none";
+  document.getElementById("pauseMenu").style.display = "none";
+  document.getElementById("pauseButton").textContent = "⏸ Pausa";
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+    loadImages(sources, () => {
+      console.log("Imágenes cargadas.");
+    });
+    setupMobileControls();
+  </script>
+  <div id="mobile-controls">
+  <button class="btn" id="btn-left">◀</button>
+  <button class="btn" id="btn-right">▶</button>
+  <button class="btn" id="btn-up">▲</button>
+  <button class="btn" id="btn-down">▼</button>
+</div>
+
+<script>
+let playerMissiles = [];
+let enemyHealth = new Map();
+
+function fireMissile() {
+  playerMissiles.push({
+    x: player.x + player.width / 2 - 4,
+    y: player.y,
+    width: 8,
+    height: 16,
+    speed: 7
+  });
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.code === 'Space') {
+    fireMissile();
+  }
+});
+
+function updateMissiles() {
+  playerMissiles.forEach(m => m.y -= m.speed);
+  playerMissiles = playerMissiles.filter(m => m.y > 0);
+}
+
+function updateEnemyHealth(obstacle) {
+  const key = obstacle.id;
+  const maxHits = obstacle.isBoss ? 7 : 4;
+  let hits = enemyHealth.get(key) || 0;
+  hits += 1;
+  if (hits >= maxHits) {
+    enemyHealth.delete(key);
+    return true;
+  } else {
+    enemyHealth.set(key, hits);
+    return false;
+  }
+}
+
+function updateEnemiesZigZag() {
+  obstacles.forEach((o, i) => {
+    if (o.type === 'alien') {
+      o.x += Math.sin(Date.now() / 200 + i) * 1.5;
+      o.x = Math.max(0, Math.min(canvas.width - o.width, o.x));
+    }
+  });
+}
+
+function drawMissiles() {
+  playerMissiles.forEach(m => {
+    ctx.drawImage(images.playermissile, m.x, m.y, m.width, m.height);
+  });
+}
+
+function drawHearts() {
+  for (let i = 0; i < lives; i++) {
+    ctx.drawImage(images.heart, 10 + i * 25, 30, 20, 20);
+  }
+}
+
+// Inserta estas llamadas dentro de update() y draw()
+
+// Dentro de update()
+updateMissiles();
+updateEnemiesZigZag();
+
+// Colisión de misiles con enemigos
+playerMissiles.forEach((m, mi) => {
+  obstacles.forEach((o, oi) => {
+    if (
+      m.x < o.x + o.width &&
+      m.x + m.width > o.x &&
+      m.y < o.y + o.height &&
+      m.y + m.height > o.y
+    ) {
+      playerMissiles.splice(mi, 1);
+      if (updateEnemyHealth(o)) {
+      obstacles.splice(oi, 1);
+      if (o.isBoss) {
+        score += 50;
+      } else if (o.type === 'alien') {
+        score += 10;
+      } else {
+        score += 5;
+      }
+      }
+    }
+  });
+});
+
+// Dentro de draw()
+drawMissiles();
+drawHearts();
+</script>
+</body>
+</html>
+
+
+<script>
+function resetRanking() {
+  if (confirm("¿Seguro que deseas borrar el ranking?")) {
+    localStorage.removeItem("leaderboard");
+    localStorage.removeItem("leaderboardTimes");
+    leaderboard = {};
+    leaderboardTimes = {};
+    updateRankingPanel();
+    alert("Ranking reiniciado.");
+  }
+}
+</script>
