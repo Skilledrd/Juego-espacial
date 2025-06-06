@@ -40,6 +40,13 @@
   <button onclick="resumeGame()">▶ Continuar</button>
   <button onclick="returnToMenu()">Volver al menú</button>
 </div>
+<div id="mobile-controls">
+  <button class="btn" id="btn-left">◀</button>
+  <button class="btn" id="btn-right">▶</button>
+  <button class="btn" id="btn-up">▲</button>
+  <button class="btn" id="btn-down">▼</button>
+  <button class="btn" id="btn-fire">💥</button>
+</div>
 
   <script>
     const canvas = document.getElementById("game");
@@ -213,13 +220,26 @@ function spawnObstacle() {
 }
 
     function shootMissile(enemy) {
-      const maxMissiles = level >= 15 ? 3 : level >= 10 ? 2 : 1;
-      if (enemy.isBoss && enemy.homingCount < maxMissiles) {
-        homingMissiles.push({ x: enemy.x + enemy.width / 2, y: enemy.y + enemy.height, width: 12, height: 20, age: 0 });
-        enemy.homingCount++;
-      } else if (!enemy.isBoss) {
-        enemyMissiles.push({ x: enemy.x + 15, y: enemy.y + 35, width: 10, height: 20 });
-      }
+      if (enemy.isBoss) {
+        const maxMissiles = level >= 15 ? 3 : level >= 10 ? 2 : 1;
+        if (enemy.homingCount < maxMissiles) {
+          homingMissiles.push({
+            x: enemy.x + enemy.width / 2,
+            y: enemy.y + enemy.height,
+            width: 12,
+            height: 20,
+            age: 0
+          });
+            enemy.homingCount++;
+            }
+          } else {
+            enemyMissiles.push({
+              x: enemy.x + enemy.width / 2 - 5,
+              y: enemy.y + enemy.height,
+              width: 10,
+              height: 20
+              });
+            }
     }
 
     function update() {
@@ -242,12 +262,21 @@ function spawnObstacle() {
 
       obstacles.forEach((o) => {
         o.y += obstacleSpeed;
-        if (o.type === 'alien' && o.shootCooldown <= 0) {
-          shootMissile(o);
-          o.shootCooldown = 120 - level * 5;
-        }
-        o.shootCooldown--;
-      });
+        if (o.isBoss) {
+          if (player.x + player.width / 2 < o.x + o.width / 2) {
+            o.x -= 1.2;
+            } else {
+              o.x += 1.2;
+          }
+          o.x = Math.max(0, Math.min(canvas.width - o.width, o.x));
+          }
+          if ((o.type === 'alien' || o.isBoss) && o.shootCooldown <= 0) {
+            shootMissile(o);
+            o.shootCooldown = o.isBoss ? 120 : 180;
+            }
+            if (o.shootCooldown > 0) o.shootCooldown--;
+          });
+        
       playerMissiles.forEach((m, mi) => {
   obstacles.forEach((o, oi) => {
     if (
@@ -262,9 +291,9 @@ function spawnObstacle() {
       if (o.isBoss) {
         score += 50;
       } else if (o.type === 'alien') {
-        score += 10;
+        score += 15;
       } else {
-        score += 5;
+        score += 10;
       }
       }
     }
@@ -280,13 +309,10 @@ function spawnObstacle() {
         if (m.age > 240) m.remove = true;
         let dx = player.x + player.width / 2 - m.x;
         let dy = player.y + player.height / 2 - m.y;
-        let dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 0) {
-          dx /= dist;
-          dy /= dist;
-          m.x += dx * 2;
-          m.y += dy * 2;
-        }
+        const angle = Math.atan2(dy, dx);
+        const speed = 3.5;
+        m.x += Math.cos(angle) * speed;
+        m.y += Math.sin(angle) * speed;
       });
       homingMissiles = homingMissiles.filter(m => !m.remove);
 
@@ -311,7 +337,7 @@ function spawnObstacle() {
       }
       if (score >= nextLifeScore) {
       lives++;
-      nextLifeScore += 500;
+      nextLifeScore += 170;
 }
     }
 
@@ -374,6 +400,7 @@ function spawnObstacle() {
       }
 
     function startGame() {
+      document.getElementById("instrucciones-juego").style.display = "none";
       clearInterval(gameLoopInterval);
       clearInterval(spawnTimer);
       gameLoopInterval = null;
@@ -428,13 +455,9 @@ function spawnObstacle() {
       console.log("Imágenes cargadas.");
     });
     setupMobileControls();
+    const btnFire = document.getElementById("btn-fire");
+    btnFire.addEventListener("touchstart", () => fireMissile());
   </script>
-  <div id="mobile-controls">
-  <button class="btn" id="btn-left">◀</button>
-  <button class="btn" id="btn-right">▶</button>
-  <button class="btn" id="btn-up">▲</button>
-  <button class="btn" id="btn-down">▼</button>
-</div>
 
 <script>
 let playerMissiles = [];
@@ -478,7 +501,7 @@ function updateEnemyHealth(obstacle) {
 function updateEnemiesZigZag() {
   obstacles.forEach((o, i) => {
     if (o.type === 'alien') {
-      o.x += Math.sin(Date.now() / 200 + i) * 1.5;
+      o.x += Math.sin(Date.now() / 600 + i) * 2.5;
       o.x = Math.max(0, Math.min(canvas.width - o.width, o.x));
     }
   });
@@ -531,8 +554,16 @@ drawMissiles();
 drawHearts();
 </script>
 <footer style="position: fixed; bottom: 5px; width: 100%; text-align: center; color: cyan; font-size: 12px; font-family: monospace;">
-    Juego hecho por Manuel S
+    Juego creado por Manuel Suero
   </footer>
+  <div id="instrucciones-juego" style="position: fixed; top: 100px; left: 10px; background: rgba(0,0,0,0.75); color: cyan; padding: 10px; border-radius: 8px; font-size: 13px; font-family: monospace; max-width: 240px; z-index: 50;">
+    <strong>🎮 Instrucciones:</strong><br>
+    ▶ Mover: Flechas (↑ ↓ ← →) <br>
+    ▶ Disparar: Barra espaciadora<br>
+    ▶ Pausar: ⏸ o tecla P<br><br>
+    Gana puntos destruyendo enemigos.<br>
+    ¡Evita los misiles y sobrevive!
+  </div>
 </body>
 </html>
 
